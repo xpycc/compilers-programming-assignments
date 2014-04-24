@@ -40,13 +40,13 @@ extern int node_lineno;          /* set before constructing a tree node
 * (fictional) construct that matches a plus between two integer constants. 
 * (SUCH A RULE SHOULD NOT BE  PART OF YOUR PARSER):
 
-plus_consts  : INT_CONST '+' INT_CONST 
+plus_consts : INT_CONST '+' INT_CONST 
 
 * where INT_CONST is a terminal for an integer constant. Now, a correct
 * action for this rule that attaches the correct line number to plus_const
 * would look like the following:
 
-plus_consts  : INT_CONST '+' INT_CONST 
+plus_consts : INT_CONST '+' INT_CONST 
 {
   // Set the line number of the current non-terminal:
   // ***********************************************
@@ -159,8 +159,8 @@ documentation for details). */
 program             : class_list
                         { @$ = @1; ast_root = program($1); }
                     ;
-                 
-class_list          : class  ';'                        /* single class             */
+                
+class_list          : class ';'                         /* single class             */
                         { $$ = single_Classes($1);
                           parse_results = $$; }
                     | error ';'                         /* error handling           */
@@ -172,7 +172,7 @@ class_list          : class  ';'                        /* single class         
                     | class_list error ';'              /* error handling           */
                         { $$ = $1; }
                     ;
-                 
+                
 class               : CLASS TYPEID '{' feature_list '}'
                         { $$ = class_($2, idtable.add_string("Object"), $4,
                           stringtable.add_string(curr_filename)); }
@@ -292,6 +292,8 @@ expr                : OBJECTID ASSIGN expr
                   
 let_tail            : IN expr   %prec LETEXPR           /* expr extends as far as possible */
                         { $$ = $2; }
+                    | IN error                          /* error handling for */
+                        { $$ = no_expr(); }
                     | ',' OBJECTID ':' TYPEID let_tail
                         { $$ = let($2, $4, no_expr(), $5); }
                     | ',' OBJECTID ':' TYPEID ASSIGN expr let_tail

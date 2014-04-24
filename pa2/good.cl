@@ -5,4 +5,5 @@ ana(): Int {
 };
 
 Class BB__ inherits A {
+hehe(): Int { 1 };
 };
