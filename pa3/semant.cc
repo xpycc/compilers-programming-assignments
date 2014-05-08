@@ -1,11 +1,9 @@
-
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <set>
 #include "semant.h"
 #include "utilities.h"
-
 
 extern int semant_debug;
 extern char *curr_filename;
@@ -82,15 +80,88 @@ static void initialize_constants(void)
 }
 
 ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) {
-  // TODO: class hierarchical checking
+  // TODO: class inheritance checking
+  using std::map; using std::set;
+
+  Symbol Cycle = idtable.add_string("_cycle_class");
   install_basic_classes();
-  for (int i = classes.first(); classes.more(i); i = classes.next(i)) {
-    Class_ c = classes.nth(i);
-    if (class_map.find(c.get_name) == class_map.end()) {
-      class_map[c.get_name()] = c;     // need fix
+  map<Symbol, Symbol> ancestor;
+  ancestor[Int] = Object;
+  ancestor[Str] = Object;
+  ancestor[IO]  = Object;
+  for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+    Class_ c = classes->nth(i);
+    if (class_map.find(c->get_name()) == class_map.end()) {
+      class_map[c->get_name()] = c;
+      ancestor[c->get_name()] = c->get_parent();
     } else {
-      semant_error(c) << " \n";       // need fix
+      semant_error(c) << "Redefinition of class " << c->get_name()  << ".\n";
     }
+  }
+  if (semant_errors > 0)
+    return;
+  // END OF FIRST PASS: make sure there's no redefinition
+  for (map<Symbol, Symbol>::iterator it = ancestor.begin(); it != ancestor.end(); ++it) {
+    if (it->second == Cycle || it->second == Object)
+      continue;
+    set<Symbol> visited;
+    Symbol c = it->first, p = it->second;
+    visited.insert(c);
+    while (p != Object && p != Cycle && visited.find(p) == visited.end()) {
+      map<Symbol, Symbol>::iterator k = ancestor.find(p);
+      if (k == ancestor.end()) {
+        break;
+      } else {
+        c = p;
+        p = k->second;
+        visited.insert(c);
+      }
+    }
+    if (p == Cycle) {
+      c = it->first; p = it->second;
+      ancestor[c] = Cycle;
+      while (p != Cycle) {
+        semant_error(class_map[c]) << "Class " << c << " or an ancestor of "
+            << c << ", is involved in an inheritance cycle.\n";
+        c = p;
+        p = ancestor[p];
+        ancestor[c] = Cycle;
+      }
+    } else if (visited.find(p) != visited.end()) {
+      c = it->first; p = it->second;
+      visited.clear(); visited.insert(c);
+      semant_error(class_map[c]) << "Class " << c << " or an ancestor of "
+          << c << ", is involved in an inheritance cycle.\n";
+      ancestor[c] = Cycle;
+      while (visited.find(p) == visited.end()) {
+        c = p;
+        p = ancestor[p];
+        visited.insert(c);
+        ancestor[c] = Cycle;
+        semant_error(class_map[c]) << "Class " << c << " or an ancestor of "
+            << c << ", is involved in an inheritance cycle.\n";
+      }
+    } else if (p != Object) { // ancestor undefined
+      c = it->first; p = it->second;
+      ancestor[c] = Object;
+      while (class_map.find(p) != class_map.end()) {
+        c = p;
+        p = ancestor[p];
+        ancestor[c] = Object;
+      }
+      semant_error(class_map[c]) << "Class " << c << " inherits from an undefined class " << p << ".\n";
+    }
+    // if p == Object, it's OK!
+  }
+  // END OF SECOND PASS: make sure the classes inherit correctly
+}
+
+Class_ ClassTable::find_class(Symbol name) const {
+  std::map<Symbol, Class_>::const_iterator p = class_map.find(name);
+  if (p != class_map.end()) {
+    return p->second;
+  } else {
+    return NULL;
   }
 }
 
@@ -256,8 +327,12 @@ void program_class::semant()
   /* ClassTable constructor may do some semantic analysis */
   ClassTable *classtable = new ClassTable(classes);
 
-  /* some semantic analysis code may go here */
-  // TODO: Type checking
+  if (classtable->errors() == 0) {
+    /* some semantic analysis code may go here */
+    // TODO: Type checking
+
+
+  }
 
   if (classtable->errors()) {
     cerr << "Compilation halted due to static semantic errors." << endl;
