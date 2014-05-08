@@ -20,3 +20,12 @@ Class Main {
 	 }
 	};
 };
+
+class Object {
+};
+
+Class A inherits C {
+	init(s: String): A {
+		self
+	};
+};
