@@ -1,5 +1,5 @@
 class C {
-	a : Int;
+	a : Int <- a;
 	b : Bool;
 	init(x : Int, y : Bool) : C {
            {
