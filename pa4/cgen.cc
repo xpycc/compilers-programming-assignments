@@ -22,6 +22,8 @@
 //
 //**************************************************************
 
+#include <algorithm>
+#include <typeinfo>
 #include "cgen.h"
 #include "cgen_gc.h"
 
@@ -140,6 +142,13 @@ void program_class::cgen(ostream &os)
   os << "\n# end of generated code\n";
 }
 
+Symbol method_class::get_name() const {
+  return name;
+}
+
+Symbol attr_class::get_name() const {
+  return name;
+}
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -239,8 +248,15 @@ static void emit_gc_assign(ostream& s)
 static void emit_disptable_ref(Symbol sym, ostream& s)
 {  s << sym << DISPTAB_SUFFIX; }
 
+static void emit_disptable_def(Symbol sym, ostream &s) {
+  emit_disptable_ref(sym, s); s << LABEL;
+}
+
 static void emit_init_ref(Symbol sym, ostream& s)
 { s << sym << CLASSINIT_SUFFIX; }
+
+static void emit_init_def(Symbol sym, ostream& s)
+{ emit_init_ref(sym, s); s << LABEL; }
 
 static void emit_label_ref(int l, ostream &s)
 { s << "label" << l; }
@@ -248,8 +264,14 @@ static void emit_label_ref(int l, ostream &s)
 static void emit_protobj_ref(Symbol sym, ostream& s)
 { s << sym << PROTOBJ_SUFFIX; }
 
+static void emit_protobj_def(Symbol sym, ostream& s)
+{ emit_protobj_ref(sym, s); s << LABEL; }
+
 static void emit_method_ref(Symbol classname, Symbol methodname, ostream& s)
 { s << classname << METHOD_SEP << methodname; }
+
+static void emit_method_def(Symbol classname, Symbol methodname, ostream& s)
+{ emit_method_ref(classname, methodname, s); s << LABEL; }
 
 static void emit_label_def(int l, ostream &s)
 {
@@ -354,6 +376,22 @@ static void emit_gc_check(char *source, ostream &s)
   s << JAL << "_gc_check" << endl;
 }
 
+static void emit_enter_function(ostream &s) {
+  // TODO
+}
+
+static void emit_exit_function(ostream &s) {
+  // TODO
+}
+
+static void emit_before_call(ostream &s) {
+  // TODO
+}
+
+static void emit_after_call(ostream &s) {
+  // TODO
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -401,8 +439,8 @@ void StringEntry::code_def(ostream& s, int stringclasstag)
       << WORD << (DEFAULT_OBJFIELDS + STRING_SLOTS + (len+4)/4) << endl // size
       << WORD;
 
-
  /***** Add dispatch information for class String ******/
+      emit_disptable_ref(Str, s);
 
       s << endl;                                              // dispatch table
       s << WORD;  lensym->code_ref(s);  s << endl;            // string length
@@ -445,6 +483,7 @@ void IntEntry::code_def(ostream &s, int intclasstag)
       << WORD; 
 
  /***** Add dispatch information for class Int ******/
+      emit_disptable_ref(Int, s);
 
       s << endl;                                          // dispatch table
       s << WORD << str << endl;                           // integer value
@@ -489,6 +528,7 @@ void BoolConst::code_def(ostream& s, int boolclasstag)
       << WORD;
 
  /***** Add dispatch information for class Bool ******/
+      emit_disptable_ref(Bool, s);
 
       s << endl;                                            // dispatch table
       s << WORD << val << endl;                             // value (0 or 1)
@@ -619,9 +659,10 @@ void CgenClassTable::code_constants()
 
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
-   stringclasstag = 0 /* Change to your String class tag here */;
-   intclasstag =    0 /* Change to your Int class tag here */;
-   boolclasstag =   0 /* Change to your Bool class tag here */;
+   // Object IO Int Bool String ...
+   stringclasstag = 4 /* Change to your String class tag here */;
+   intclasstag =    2 /* Change to your Int class tag here */;
+   boolclasstag =   3 /* Change to your Bool class tag here */;
 
    enterscope();
    if (cgen_debug) cout << "Building CgenClassTable" << endl;
@@ -647,7 +688,8 @@ void CgenClassTable::install_basic_classes()
 // No_class serves as the parent of Object and the other special classes.
 // SELF_TYPE is the self class; it cannot be redefined or inherited.
 // prim_slot is a class known to the code generator.
-//
+
+/* DO NOT NEED
   addid(No_class,
 	new CgenNode(class_(No_class,No_class,nil_Features(),filename),
 			    Basic,this));
@@ -657,6 +699,7 @@ void CgenClassTable::install_basic_classes()
   addid(prim_slot,
 	new CgenNode(class_(prim_slot,No_class,nil_Features(),filename),
 			    Basic,this));
+*/
 
 // 
 // The Object class has no parent class. Its methods are
@@ -799,8 +842,10 @@ void CgenClassTable::build_inheritance_tree()
 void CgenClassTable::set_relations(CgenNodeP nd)
 {
   CgenNode *parent_node = probe(nd->get_parent());
-  nd->set_parentnd(parent_node);
-  parent_node->add_child(nd);
+  if (parent_node != NULL) {
+    nd->set_parentnd(parent_node);
+    parent_node->add_child(nd);
+  }
 }
 
 void CgenNode::add_child(CgenNodeP n)
@@ -815,7 +860,8 @@ void CgenNode::set_parentnd(CgenNodeP p)
   parentnd = p;
 }
 
-
+static SymbolTable<Symbol, int> *symtab;
+static CgenClassTable *classtable;
 
 void CgenClassTable::code()
 {
@@ -825,6 +871,21 @@ void CgenClassTable::code()
   if (cgen_debug) cout << "choosing gc" << endl;
   code_select_gc();
 
+  std::vector<StringEntry*> nametab;
+  nametab.push_back(stringtable.add_string("Object"));
+  nametab.push_back(stringtable.add_string("IO"));
+  nametab.push_back(stringtable.add_string("Int"));
+  nametab.push_back(stringtable.add_string("Bool"));
+  nametab.push_back(stringtable.add_string("String"));
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    int i; Symbol name = l->hd()->name;
+    for (i = 0; i < 5; ++i)
+      if (strcmp(nametab[i]->get_string(), name->get_string()) == 0)
+        break;
+    if (i != 5) continue;
+    nametab.push_back(stringtable.add_string(name->get_string()));
+  }
+
   if (cgen_debug) cout << "coding constants" << endl;
   code_constants();
 
@@ -832,7 +893,38 @@ void CgenClassTable::code()
 //                   - prototype objects
 //                   - class_nameTab
 //                   - dispatch tables
-//
+  
+  int curr_class_tag = 4;
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    int i; Symbol name = l->hd()->name;
+    for (i = 0; i < 5; ++i)
+      if (strcmp(nametab[i]->get_string(), name->get_string()) == 0)
+        break;
+    if (i != 5) {
+      l->hd()->set_class_tag(i);
+    } else {
+      l->hd()->set_class_tag(++curr_class_tag);
+    }
+    l->hd()->build_offset_tables();
+  }
+
+  if (cgen_debug) cout << "coding class name table\n";
+  str << CLASSNAMETAB << LABEL;
+  for (int i = 0; (size_t)i < nametab.size(); ++i) {
+    str << WORD;
+    nametab[i]->code_ref(str);
+    str << "\n";
+  }
+
+  if (cgen_debug) cout << "coding dispatch tables\n";
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    l->hd()->generate_dispatch_table(str);
+  }
+
+  if (cgen_debug) cout << "coding class prototype objects\n";
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    l->hd()->generate_prototype_object(str);
+  }
 
   if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
@@ -841,9 +933,29 @@ void CgenClassTable::code()
 //                   - object initializer
 //                   - the class methods
 //                   - etc...
+  
+  // basic class init routines
+  emit_init_def(Object, str);
+  emit_return(str);
+  emit_init_def(IO, str);
+  emit_return(str);
+  emit_init_def(Int, str);
+  emit_return(str);
+  emit_init_def(Bool, str);
+  emit_return(str);
+  emit_init_def(Str, str);
+  emit_return(str);
 
+  classtable = this;
+  symtab = new SymbolTable<Symbol, int>;
+
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    if (l->hd()->basic()) continue;
+    l->hd()->generate_initializing_routine(str);
+    l->hd()->generate_method_code(str);
+  }
+  
 }
-
 
 CgenNodeP CgenClassTable::root()
 {
@@ -866,6 +978,78 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    stringtable.add_string(name->get_string());          // Add class name to string table
 }
 
+void CgenNode::build_offset_tables() {
+  if (method_table.size() > 0) return;
+  if (name != Object) {
+    parentnd->build_offset_tables();
+    attr_table = parentnd->attr_table;
+    method_table = parentnd->method_table;
+    method_class_table = parentnd->method_class_table;
+  }
+  for (int i = features->first(); features->more(i); i = features->next(i)) {
+    Feature f = features->nth(i);
+    if (typeid(*f) == typeid(attr_class)) {
+      attr_table.push_back(f->get_name());
+    } else {
+      std::vector<Symbol>::iterator it = std::find(method_table.begin(), method_table.end(), f->get_name());
+      if (it == method_table.end()) {
+        method_table.push_back(f->get_name());
+        method_class_table.push_back(name);
+      } else {
+        method_class_table[it - method_table.begin()] = name;
+      }
+    }
+  }
+}
+
+void CgenNode::generate_dispatch_table(ostream &s) const {
+  emit_disptable_def(name, s);
+  for (int i = 0; (size_t)i < method_table.size(); ++i) {
+    s << WORD;
+    emit_method_ref(method_class_table[i], method_table[i], s);
+    s << "\n";
+  }
+}
+
+void CgenNode::generate_prototype_object(ostream &s) const {
+  s << WORD << "-1" << endl;                                  // -1 eye tag
+  emit_protobj_def(name, s);                                  // Lable
+  s << WORD << class_tag << endl                              // tag
+    << WORD << (DEFAULT_OBJFIELDS + attr_table.size()) << endl   // size
+    << WORD;
+  emit_disptable_ref(name, s);
+  s << endl;                                                  // dispatch table
+  for (int i = 0; (size_t)i < attr_table.size(); ++i) {
+    if (name == Str && i == 0)
+      s << WORD << INTCONST_PREFIX << "0\n";
+    else
+      s << WORD << "0\n";
+  }
+}
+
+void CgenNode::generate_initializing_routine(ostream &s) {
+  // notice: emit_gc_assign when cgen_Memmgr != GC_NOGC
+  emit_init_def(name, s);
+
+  // TODO
+
+  emit_return(s);
+}
+
+void CgenNode::generate_method_code(ostream &s) {
+  // notice: emit_gc_assign when cgen_Memmgr != GC_NOGC
+  for (int i = features->first(); features->more(i); i = features->next(i)) {
+    Feature f = features->nth(i);
+    if (typeid(*f) == typeid(method_class)) {
+      method_class *meth = (method_class*)f;
+      emit_method_def(name, meth->name, s);
+      
+      // TODO
+
+      emit_return(s);
+    }
+  }
+}
 
 //******************************************************************
 //

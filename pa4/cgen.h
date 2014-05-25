@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <vector>
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
@@ -55,6 +56,10 @@ private:
    List<CgenNode> *children;                  // Children of class
    Basicness basic_status;                    // `Basic' if class is basic
                                               // `NotBasic' otherwise
+   std::vector<Symbol> attr_table;
+   std::vector<Symbol> method_table;
+   std::vector<Symbol> method_class_table;
+   int class_tag;
 
 public:
    CgenNode(Class_ c,
@@ -66,6 +71,12 @@ public:
    void set_parentnd(CgenNodeP p);
    CgenNodeP get_parentnd() { return parentnd; }
    int basic() { return (basic_status == Basic); }
+   void build_offset_tables();
+   void set_class_tag(int tag) { class_tag = tag; }
+   void generate_prototype_object(ostream &s) const;
+   void generate_dispatch_table(ostream &s) const;
+   void generate_initializing_routine(ostream &s);
+   void generate_method_code(ostream &s);
 };
 
 class BoolConst 
