@@ -57,6 +57,7 @@ private:
    Basicness basic_status;                    // `Basic' if class is basic
                                               // `NotBasic' otherwise
    std::vector<Symbol> attr_table;
+   std::vector<Symbol> attr_type_table;
    std::vector<Symbol> method_table;
    std::vector<Symbol> method_class_table;
    int class_tag;
@@ -77,6 +78,8 @@ public:
    void generate_dispatch_table(ostream &s) const;
    void generate_initializing_routine(ostream &s);
    void generate_method_code(ostream &s);
+   int find_method_offset(Symbol sym) const;
+   void travel(const std::vector<branch_class*> &case_vector, int case_index, struct CaseInfo* ci);
 };
 
 class BoolConst 

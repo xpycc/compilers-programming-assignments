@@ -6,9 +6,9 @@
 class Main inherits IO {
   main():SELF_TYPE { out_string("Hello!") };
   out_string(s: String): SELF_TYPE {{
-    out_string("class Main: ");
-	out_string(s);
-    out_string("\n");
+    self@IO.out_string("class Main: ");
+	self@IO.out_string(s);
+    self@IO.out_string("\n");
   }};
 };
 

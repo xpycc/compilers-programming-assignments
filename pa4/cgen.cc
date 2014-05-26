@@ -150,6 +150,10 @@ Symbol attr_class::get_name() const {
   return name;
 }
 
+Symbol formal_class::get_name() const {
+  return name;
+}
+
 //////////////////////////////////////////////////////////////////////////////
 //
 //  emit_* procedures
@@ -248,8 +252,14 @@ static void emit_gc_assign(ostream& s)
 static void emit_disptable_ref(Symbol sym, ostream& s)
 {  s << sym << DISPTAB_SUFFIX; }
 
-static void emit_disptable_def(Symbol sym, ostream &s) {
+static inline void emit_disptable_def(Symbol sym, ostream &s) {
   emit_disptable_ref(sym, s); s << LABEL;
+}
+
+static inline void emit_load_disptable(char *dist, Symbol sym, ostream &s) {
+  emit_partial_load_address(dist, s);
+  emit_disptable_ref(sym, s);
+  s << '\n';
 }
 
 static void emit_init_ref(Symbol sym, ostream& s)
@@ -258,20 +268,38 @@ static void emit_init_ref(Symbol sym, ostream& s)
 static void emit_init_def(Symbol sym, ostream& s)
 { emit_init_ref(sym, s); s << LABEL; }
 
+static inline void emit_call_init(Symbol sym, ostream &s) {
+  s << JAL;
+  emit_init_ref(sym, s);
+  s << '\n';
+}
+
 static void emit_label_ref(int l, ostream &s)
 { s << "label" << l; }
 
 static void emit_protobj_ref(Symbol sym, ostream& s)
 { s << sym << PROTOBJ_SUFFIX; }
 
-static void emit_protobj_def(Symbol sym, ostream& s)
+static inline void emit_protobj_def(Symbol sym, ostream& s)
 { emit_protobj_ref(sym, s); s << LABEL; }
+
+static inline void emit_load_protobj(char *dist, Symbol sym, ostream &s) {
+  emit_partial_load_address(dist, s);
+  emit_protobj_ref(sym, s);
+  s << '\n';
+}
 
 static void emit_method_ref(Symbol classname, Symbol methodname, ostream& s)
 { s << classname << METHOD_SEP << methodname; }
 
-static void emit_method_def(Symbol classname, Symbol methodname, ostream& s)
+static void inline emit_method_def(Symbol classname, Symbol methodname, ostream& s)
 { emit_method_ref(classname, methodname, s); s << LABEL; }
+
+static void inline emit_call_method(Symbol classname, Symbol methodname, ostream &s) {
+  s << JAL;
+  emit_method_ref(classname, methodname, s);
+  s << '\n';
+}
 
 static void emit_label_def(int l, ostream &s)
 {
@@ -377,21 +405,23 @@ static void emit_gc_check(char *source, ostream &s)
 }
 
 static void emit_enter_function(ostream &s) {
-  // TODO
+  emit_addiu(SP, SP, -3 * WORD_SIZE, s);
+  emit_store(FP, 3, SP, s);
+  emit_store(SELF, 2, SP, s);
+  emit_store(RA, 1, SP, s);
+  emit_addiu(FP, SP, WORD_SIZE, s);
+  emit_move(SELF, ACC, s);
 }
 
-static void emit_exit_function(ostream &s) {
-  // TODO
+static void emit_exit_function(int cc, ostream &s) {
+  // there is no need to copy self to acc
+  // the result can be other value than self
+  emit_load(FP, 3, SP, s);
+  emit_load(SELF, 2, SP, s);
+  emit_load(RA, 1, SP, s);
+  emit_addiu(SP, SP, (3 + cc) * WORD_SIZE, s);
+  emit_return(s);
 }
-
-static void emit_before_call(ostream &s) {
-  // TODO
-}
-
-static void emit_after_call(ostream &s) {
-  // TODO
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -860,8 +890,15 @@ void CgenNode::set_parentnd(CgenNodeP p)
   parentnd = p;
 }
 
-static SymbolTable<Symbol, int> *symtab;
+struct SymInfo {
+  Symbol type;
+  int offset;
+  SymInfo(Symbol t = NULL, int o = 0): type(t), offset(o) {}
+};
+
+static SymbolTable<Symbol, SymInfo> *symtab;
 static CgenClassTable *classtable;
+static CgenNode *curr_class;        // for dispatching
 
 void CgenClassTable::code()
 {
@@ -916,6 +953,14 @@ void CgenClassTable::code()
     str << "\n";
   }
 
+  // TODO: check this
+  if (cgen_debug) cout << "coding class prototype object table\n";    // for new SELF_TYPE
+  str << CLASSOBJTAB << LABEL;
+  for (int i = 0; (size_t)i < nametab.size(); ++i) {
+    str << WORD; emit_protobj_ref(nametab[i], str); str << "\n";
+    str << WORD; emit_init_ref(nametab[i], str); str << "\n";
+  }  
+
   if (cgen_debug) cout << "coding dispatch tables\n";
   for (List<CgenNode>* l = nds; l; l = l->tl()) {
     l->hd()->generate_dispatch_table(str);
@@ -947,12 +992,15 @@ void CgenClassTable::code()
   emit_return(str);
 
   classtable = this;
-  symtab = new SymbolTable<Symbol, int>;
+  symtab = new SymbolTable<Symbol, SymInfo>;
 
   for (List<CgenNode>* l = nds; l; l = l->tl()) {
     if (l->hd()->basic()) continue;
+    symtab->enterscope();
+    curr_class = l->hd();
     l->hd()->generate_initializing_routine(str);
     l->hd()->generate_method_code(str);
+    symtab->exitscope();
   }
   
 }
@@ -983,6 +1031,7 @@ void CgenNode::build_offset_tables() {
   if (name != Object) {
     parentnd->build_offset_tables();
     attr_table = parentnd->attr_table;
+    attr_type_table = parentnd->attr_type_table;
     method_table = parentnd->method_table;
     method_class_table = parentnd->method_class_table;
   }
@@ -990,11 +1039,13 @@ void CgenNode::build_offset_tables() {
     Feature f = features->nth(i);
     if (typeid(*f) == typeid(attr_class)) {
       attr_table.push_back(f->get_name());
+      attr_type_table.push_back(((attr_class*)f)->type_decl);
     } else {
       std::vector<Symbol>::iterator it = std::find(method_table.begin(), method_table.end(), f->get_name());
       if (it == method_table.end()) {
         method_table.push_back(f->get_name());
         method_class_table.push_back(name);
+        method_class *meth = (method_class*)f;
       } else {
         method_class_table[it - method_table.begin()] = name;
       }
@@ -1020,35 +1071,111 @@ void CgenNode::generate_prototype_object(ostream &s) const {
   emit_disptable_ref(name, s);
   s << endl;                                                  // dispatch table
   for (int i = 0; (size_t)i < attr_table.size(); ++i) {
-    if (name == Str && i == 0)
-      s << WORD << INTCONST_PREFIX << "0\n";
-    else
+    if (attr_type_table[i] == Str) {
+      s << WORD;
+      stringtable.lookup_string("")->code_ref(s);
+      s << '\n';
+    } else if (attr_type_table[i] == Int) {
+      s << WORD;
+      inttable.lookup_string("0")->code_ref(s);
+      s << '\n';
+    } else if (attr_type_table[i] == Bool) {
+      s << WORD;
+      falsebool.code_ref(s);
+      s << '\n';
+    } else {
       s << WORD << "0\n";
+    }
   }
 }
 
-void CgenNode::generate_initializing_routine(ostream &s) {
-  // notice: emit_gc_assign when cgen_Memmgr != GC_NOGC
-  emit_init_def(name, s);
+static int curr_temp_offset;
 
-  // TODO
-
-  emit_return(s);
+static inline int self_offset(int i) {
+  return (0 << 24) | (i + DEFAULT_OBJFIELDS);
 }
 
+// TODO: to be checked
+void CgenNode::generate_initializing_routine(ostream &s) {
+  // notice: emit_gc_assign when cgen_Memmgr != GC_NOGC
+  for (int i = 0; (size_t)i < attr_table.size(); ++i) {
+    symtab->addid(attr_table[i], new SymInfo(attr_type_table[i], self_offset(i)));
+  }
+  emit_init_def(name, s);
+  emit_enter_function(s);
+  curr_temp_offset = 1;
+
+  // emit_move(ACC, SELF, s);   // acc is already self
+  emit_call_init(parent, s);
+  // emit_move(SELF, ACC);      // self is already restored
+
+  int cc = (int)parentnd->attr_table.size();
+  for (int i = features->first(); features->more(i); i = features->next(i)) {
+    Feature f = features->nth(i);
+    if (typeid(*f) == typeid(attr_class)) {
+      attr_class *attr = (attr_class*)f;
+      if (attr->init->type != No_type && attr->init->type != NULL) {
+        attr->init->code(s);
+        emit_store(ACC, cc + DEFAULT_OBJFIELDS, SELF, s);
+        if (cgen_Memmgr != GC_NOGC) {
+          emit_addiu(A1, SELF, (cc + DEFAULT_OBJFIELDS) * WORD_SIZE, s);
+          emit_gc_assign(s);
+        }
+      }
+      ++cc;
+    }
+  }
+  emit_move(ACC, SELF, s);
+  emit_exit_function(0, s);
+  // emit_return(s);
+}
+
+static int curr_label_number;         // used for LABELXX:
+
+static inline int para_offset(int i) {  // range from 0 to n - 1, $fp offset
+  return (1 << 24) | i;
+}
+
+static int count_formals(Formals formals) {
+  int cc = 0;
+  for (int i = formals->first(); formals->more(i); i = formals->next(i))
+    ++cc;
+  for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
+    formal_class* f = (formal_class*)formals->nth(i);
+    symtab->addid(f->name, new SymInfo(f->type_decl, para_offset(cc - 1 - i + 3)));
+  }
+  return cc;
+}
+
+static inline int temp_offset(int i) {  // starting from 1, $fp offset
+  return -i;
+}
+
+// TODO: to be checked
 void CgenNode::generate_method_code(ostream &s) {
   // notice: emit_gc_assign when cgen_Memmgr != GC_NOGC
   for (int i = features->first(); features->more(i); i = features->next(i)) {
     Feature f = features->nth(i);
     if (typeid(*f) == typeid(method_class)) {
       method_class *meth = (method_class*)f;
-      emit_method_def(name, meth->name, s);
-      
-      // TODO
+      symtab->enterscope();
+      int formal_cnt = count_formals(meth->formals);
 
-      emit_return(s);
+      emit_method_def(name, meth->name, s);
+      emit_enter_function(s);
+      curr_temp_offset = 1;
+
+      meth->expr->code(s);
+
+      emit_exit_function(formal_cnt, s);
+      // emit_return(s);
+      symtab->exitscope();
     }
   }
+}
+
+int CgenNode::find_method_offset(Symbol sym) const {
+  return std::find(method_table.begin(), method_table.end(), sym) - method_table.begin();
 }
 
 //******************************************************************
@@ -1062,58 +1189,360 @@ void CgenNode::generate_method_code(ostream &s) {
 //*****************************************************************
 
 void assign_class::code(ostream &s) {
+  expr->code(s);
+
+  int offset = symtab->lookup(name)->offset;
+  switch (offset >> 24) {
+   case 0:
+    emit_store(ACC, offset &= ~(0xff << 24), SELF, s);
+    if (cgen_Memmgr != GC_NOGC) {
+      emit_addiu(A1, SELF, offset * WORD_SIZE, s);
+      emit_gc_assign(s);
+    }
+    break;
+   case 1:
+    emit_store(ACC, offset &= ~(0xff << 24), FP, s);
+/*    if (cgen_Memmgr != GC_NOGC) {
+      emit_addiu(A1, FP, offset * WORD_SIZE, s);
+      emit_gc_assign(s);
+    }*/
+    break;
+   default:
+    emit_store(ACC, offset, FP, s);
+/*    if (cgen_Memmgr != GC_NOGC) {
+      emit_addiu(A1, FP, offset * WORD_SIZE, s);
+      emit_gc_assign(s);
+    } */
+    break;
+  }
+  // ACC is already stored value
 }
 
 void static_dispatch_class::code(ostream &s) {
+  int cc = 0;
+  for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+    actual->nth(i)->code(s);
+    emit_push(ACC, s);
+    ++curr_temp_offset; ++cc;
+  }
+  if (type_name == Str && name == substr) {     // an issue of String.substr
+    emit_load(T1, 2, SP, s);
+    emit_load(T2, 1, SP, s);
+    emit_store(T1, 1, SP, s);
+    emit_store(T2, 2, SP, s);
+  }
+  expr->code(s);
+  emit_bne(ACC, ZERO, curr_label_number, s);  // goto call_fun
+  emit_load_string(ACC, (StringEntry*)curr_class->filename, s);
+  emit_load_imm(T1, 1, s);
+  emit_jal("_dispatch_abort", s);
+  emit_label_def(curr_label_number++, s);     // call_fun:
+  emit_call_method(type_name, name, s);     // will pop automatically
+  curr_temp_offset -= cc;   // restore curr_temp_offset manually
 }
 
 void dispatch_class::code(ostream &s) {
+  int cc = 0;
+  for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+    actual->nth(i)->code(s);
+    emit_push(ACC, s);
+    ++curr_temp_offset; ++cc;
+  }
+  if (expr->type == Str && name == substr) {     // an issue of String.substr
+    emit_load(T1, 2, SP, s);
+    emit_load(T2, 1, SP, s);
+    emit_store(T1, 1, SP, s);
+    emit_store(T2, 2, SP, s);
+  }
+  expr->code(s);
+  emit_bne(ACC, ZERO, curr_label_number, s);  // goto call_fun
+  emit_load_string(ACC, (StringEntry*)curr_class->filename, s);
+  emit_load_imm(T1, 1, s);
+  emit_jal("_dispatch_abort", s);
+  emit_label_def(curr_label_number++, s);     // call_fun:
+  emit_load(T1, DISPTABLE_OFFSET, ACC, s);
+  int offset;
+  if (expr->type != SELF_TYPE) {
+    offset = classtable->lookup(expr->type)->find_method_offset(name);
+  } else {
+    offset = curr_class->find_method_offset(name);
+  }
+
+  emit_load(T1, offset, T1, s);
+  emit_jalr(T1, s);
+  curr_temp_offset -= cc;
 }
 
 void cond_class::code(ostream &s) {
+  pred->code(s);
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_load(ACC, DEFAULT_OBJFIELDS, ACC, s);
+  emit_beq(ACC, ZERO, base_label_number, s);    // goto false_brach
+  then_exp->code(s);
+  emit_branch(base_label_number + 1, s);        // goto end_if
+  emit_label_def(base_label_number, s);         // false_branch:
+  else_exp->code(s);
+  emit_label_def(base_label_number + 1, s);     // end_if:
 }
 
 void loop_class::code(ostream &s) {
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_label_def(base_label_number, s);         // begin_loop:
+  pred->code(s);
+  emit_load(ACC, DEFAULT_OBJFIELDS, ACC, s);
+  emit_beq(ACC, ZERO, base_label_number + 1, s);// goto end_loop
+  body->code(s);
+  emit_branch(base_label_number, s);            // goto begin_loop
+  emit_label_def(base_label_number + 1, s);     // end_loop:
+}
+
+struct CaseInfo {
+  int temp_offset;
+  int exit_point;
+  ostream *sp;
+};
+
+struct BranchComp {
+  Symbol type_decl;
+  bool operator () (branch_class *bc) {
+    return bc->type_decl == type_decl;
+  }
+  BranchComp(Symbol t): type_decl(t) {}
+};
+
+void CgenNode::travel(const std::vector<branch_class*> &case_vector, int case_index, struct CaseInfo* ci) {
+  int i = std::find_if(case_vector.begin(), case_vector.end(), BranchComp(name)) - case_vector.begin();
+  if (i != (int)case_vector.size()) {
+    case_index = i;
+  }
+  if (case_index != (int)case_vector.size()) {
+    symtab->enterscope();
+    symtab->addid(case_vector[case_index]->name,
+        new SymInfo(case_vector[case_index]->type_decl, ci->temp_offset));
+
+    emit_load_imm(T1, class_tag, *ci->sp);
+    emit_load(T2, TAG_OFFSET, ACC, *ci->sp);
+    emit_bne(T1, T2, curr_label_number, *ci->sp);     // goto not_matched
+
+    case_vector[case_index]->expr->code(*ci->sp);     // matched code here
+    emit_branch(ci->exit_point, *ci->sp);             // goto exit_point
+
+    emit_label_def(curr_label_number++, *ci->sp);     // not_matched: next_class or exception code
+
+    symtab->exitscope();
+  }
+  for (List<CgenNode> *l = children; l; l = l->tl()) {
+    l->hd()->travel(case_vector, case_index, ci);
+  }
 }
 
 void typcase_class::code(ostream &s) {
+  expr->code(s);
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_bne(ACC, ZERO, base_label_number, s);    // goto cases
+  emit_load_string(ACC, (StringEntry*)curr_class->filename, s);
+  emit_load_imm(T1, 1, s);
+  emit_jal("_case_abort2", s);
+
+  emit_label_def(base_label_number, s);         // cases:
+  emit_push(ACC, s);       // store to the stack
+  std::vector<branch_class*> case_vector;
+  for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+    case_vector.push_back((branch_class*)cases->nth(i));
+  }
+  struct CaseInfo ci = { temp_offset(curr_temp_offset++), base_label_number + 1, &s };
+  if (expr->type != SELF_TYPE) {
+    classtable->lookup(expr->type)->travel(case_vector, (int)case_vector.size(), &ci);
+  } else {
+    classtable->lookup(curr_class->name)->travel(case_vector, (int)case_vector.size(), &ci);
+  }
+
+  // travel has defined no_match
+  emit_jal("_case_abort", s);
+  emit_label_def(base_label_number + 1, s);     // exit_point:
+  emit_addiu(SP, SP, 4, s);             // pop stack
+  --curr_temp_offset;
 }
 
 void block_class::code(ostream &s) {
+  for (int i = body->first(); body->more(i); i = body->next(i))
+    body->nth(i)->code(s);
 }
 
 void let_class::code(ostream &s) {
+  if (type_decl == Int && init->type == No_type) {      // default built in objects
+    emit_load_int(ACC, inttable.lookup_string("0"), s);
+  } else if (type_decl == Str && init->type == No_type) {
+    emit_load_string(ACC, stringtable.lookup_string(""), s);
+  } else if (type_decl == Bool && init->type == No_type) {
+    emit_load_bool(ACC, falsebool, s);
+  } else {
+    init->code(s);
+  }
+  emit_push(ACC, s);
+  symtab->enterscope();
+  symtab->addid(identifier, new SymInfo(type_decl, temp_offset(curr_temp_offset++)));
+
+  body->code(s);
+
+  symtab->exitscope();
+  emit_addiu(SP, SP, 4, s);   // pop stack
+  --curr_temp_offset;
 }
 
 void plus_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_call_method(Object, ::copy, s);
+  emit_load(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_load(T2, 1, SP, s);
+  emit_load(T2, DEFAULT_OBJFIELDS, T2, s);
+  emit_add(T1, T1, T2, s);
+  emit_store(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_addiu(SP, SP, 4, s);      // pop stack;
+  --curr_temp_offset;
 }
 
 void sub_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_call_method(Object, ::copy, s);
+  emit_load(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_load(T2, 1, SP, s);
+  emit_load(T2, DEFAULT_OBJFIELDS, T2, s);
+  emit_sub(T1, T1, T2, s);
+  emit_store(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_addiu(SP, SP, 4, s);      // pop stack;
+  --curr_temp_offset;
 }
 
 void mul_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_call_method(Object, ::copy, s);
+  emit_load(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_load(T2, 1, SP, s);
+  emit_load(T2, DEFAULT_OBJFIELDS, T2, s);
+  emit_mul(T1, T1, T2, s);
+  emit_store(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_addiu(SP, SP, 4, s);      // pop stack;
+  --curr_temp_offset;
 }
 
 void divide_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_call_method(Object, ::copy, s);
+  emit_load(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_load(T2, 1, SP, s);
+  emit_load(T2, DEFAULT_OBJFIELDS, T2, s);
+  emit_div(T1, T1, T2, s);
+  emit_store(T1, DEFAULT_OBJFIELDS, ACC, s);
+  emit_addiu(SP, SP, 4, s);      // pop stack;
+  --curr_temp_offset;
 }
 
 void neg_class::code(ostream &s) {
+  e1->code(s);
+  emit_call_method(Object, ::copy, s);
+  emit_load(T1, 3, ACC, s);
+  emit_neg(T1, T1, s);
+  emit_store(T1, 3, ACC, s);
 }
 
 void lt_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_load(T1, 1, SP, s);
+  emit_load(T1, 3, T1, s);
+  emit_load(ACC, 3, ACC, s);
+
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_blt(T1, ACC, base_label_number, s);    // goto true_branch
+  emit_load_bool(ACC, falsebool, s);
+  emit_branch(base_label_number + 1, s);      // goto end_if
+  emit_label_def(base_label_number, s);       // true_branch:
+  emit_load_bool(ACC, truebool, s);
+  emit_label_def(base_label_number + 1, s);   // end_if:
+
+  emit_addiu(SP, SP, 4, s);   // pop stack
+  --curr_temp_offset;
 }
 
 void eq_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_load(T1, 1, SP, s);
+
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_beq(T1, ACC, base_label_number, s);    // goto true_branch
+  emit_move(T2, ACC, s);
+  emit_load_bool(ACC, truebool, s);
+  emit_load_bool(A1, falsebool, s);
+  s << JAL << "equality_test\n";
+  emit_branch(base_label_number + 1, s);      // goto end_if
+  emit_label_def(base_label_number, s);       // true_branch:
+  emit_load_bool(ACC, truebool, s);
+  emit_label_def(base_label_number + 1, s);   // end_if:
+
+  emit_addiu(SP, SP, 4, s);   // pop stack
+  --curr_temp_offset;
 }
 
 void leq_class::code(ostream &s) {
+  e1->code(s);
+  emit_push(ACC, s);
+  ++curr_temp_offset;
+  e2->code(s);
+  emit_load(T1, 1, SP, s);
+  emit_load(T1, 3, T1, s);
+  emit_load(ACC, 3, ACC, s);
+
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_bleq(T1, ACC, base_label_number, s);    // goto true_branch
+  emit_load_bool(ACC, falsebool, s);
+  emit_branch(base_label_number + 1, s);      // goto end_if
+  emit_label_def(base_label_number, s);       // true_branch:
+  emit_load_bool(ACC, truebool, s);
+  emit_label_def(base_label_number + 1, s);   // end_if:
+
+  emit_addiu(SP, SP, 4, s);   // pop stack
+  --curr_temp_offset;
 }
 
 void comp_class::code(ostream &s) {
+  e1->code(s);
+  emit_load(ACC, 3, ACC, s);
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_bne(ACC, ZERO, base_label_number, s);    // goto true_branch
+  emit_load_bool(ACC, truebool, s);
+  emit_branch(base_label_number + 1, s);        // goto end_if
+  emit_label_def(base_label_number, s);         // true_branch:
+  emit_load_bool(ACC, falsebool, s);
+  emit_label_def(base_label_number + 1, s);     // end_if:
 }
 
 void int_const_class::code(ostream& s)  
-{
+{ 
   //
   // Need to be sure we have an IntEntry *, not an arbitrary Symbol
   //
@@ -1131,15 +1560,55 @@ void bool_const_class::code(ostream& s)
 }
 
 void new__class::code(ostream &s) {
+  if (type_name == SELF_TYPE) {
+    emit_load(T1, TAG_OFFSET, SELF, s);
+    emit_sll(T1, T1, 3, s);
+    emit_load_address(T2, CLASSOBJTAB, s);
+    emit_add(T1, T1, T2, s);                    // CLASSOBJTAB + TAGOFFSET * 2 * 4
+    emit_load(ACC, 0, T1, s);                   // prototype object
+    emit_move("$s1", T1, s);
+    emit_call_method(Object, ::copy, s);        // call Object.copy
+    emit_load(T1, 1, "$s1", s);                  // object initializing function
+    emit_jalr(T1, s);                           // call init
+  } else {
+    emit_load_protobj(ACC, type_name, s);
+    emit_call_method(Object, ::copy, s);        // call Object.copy
+    emit_call_init(type_name, s);               // call init
+                                                // ACC is already SELF
+  }
 }
 
 void isvoid_class::code(ostream &s) {
+  e1->code(s);
+  int base_label_number = curr_label_number;
+  curr_label_number += 2;
+  emit_beq(ACC, ZERO, base_label_number, s);    // goto true_branch
+  emit_load_bool(ACC, falsebool, s);
+  emit_branch(base_label_number + 1, s);        // goto end_if
+  emit_label_def(base_label_number, s);         // true_branch:
+  emit_load_bool(ACC, truebool, s);
+  emit_label_def(base_label_number + 1, s);     // end_if:
 }
 
 void no_expr_class::code(ostream &s) {
+  emit_move(ACC, ZERO, s);
 }
 
 void object_class::code(ostream &s) {
+  if (name == self) {
+    emit_move(ACC, SELF, s);
+  } else {
+    int offset = symtab->lookup(name)->offset;
+    switch (offset >> 24) {
+     case 0:
+      emit_load(ACC, offset & ~(0xff << 24), SELF, s);
+      break;
+     case 1:
+      emit_load(ACC, offset & ~(0xff << 24), FP, s);
+      break;
+     default:
+      emit_load(ACC, offset, FP, s);
+      break;
+    }
+  }
 }
-
-
