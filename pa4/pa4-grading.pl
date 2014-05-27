@@ -5,6 +5,8 @@ use strict;
 use FileHandle;
 use Getopt::Long;
 
+die "./pa4-grading.pl doesn't work, run ./pa4-grading.sh instead!\n";
+
 my @check_files = ( "cgen.cc", "Cgen.java" );
 my $grading_dir = "./grading";
 my $grading_cmd = "./143publicgrading PA5";

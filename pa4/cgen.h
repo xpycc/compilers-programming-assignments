@@ -79,6 +79,7 @@ public:
    void generate_initializing_routine(ostream &s);
    void generate_method_code(ostream &s);
    int find_method_offset(Symbol sym) const;
+   Symbol find_method_defining_class(Symbol sym) const;
    void travel(const std::vector<branch_class*> &case_vector, int case_index, struct CaseInfo* ci);
 };
 
