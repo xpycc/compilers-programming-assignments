@@ -754,6 +754,9 @@ Symbol typcase_class::check_type() {
     if (branch_types.find(ca->get_type_decl()) != branch_types.end()) {
       SEMANT_ERROR << "Duplicate branch type " << ca->get_type_decl() << " in 'case' statement.\n";
       symboltable->addid(ca->get_name(), ca->get_type_decl());
+    } else if (ca->get_type_decl() == SELF_TYPE) {
+      SEMANT_ERROR << "Branch identifier cannot have SELF_TYPE in 'case' statement.\n";
+      symboltable->addid(ca->get_name(), curr_class->get_name());
     } else if (classtable->find_class(ca->get_type_decl()) == NULL) {
       SEMANT_ERROR << "Undefined branch type " << ca->get_type_decl() << " in 'case' statement.\n";
       symboltable->addid(ca->get_name(), Object);
