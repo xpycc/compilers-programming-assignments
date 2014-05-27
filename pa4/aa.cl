@@ -25,6 +25,7 @@ class A {
 	  a: Int => a;
       b: Bool => b;
 	  c: A => a;
+	  s: SELF_TYPE => s;
     esac
   };
 };

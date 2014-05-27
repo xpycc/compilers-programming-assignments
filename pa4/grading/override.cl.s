@@ -242,6 +242,17 @@ class_objTab:
 	.word	B_init
 	.word	A_protObj
 	.word	A_init
+class_faTab:
+	.word	-2
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	1
+	.word	7
+	.word	8
+	.word	9
+	.word	0
 Main_dispTab:
 	.word	Object.abort
 	.word	Object.type_name

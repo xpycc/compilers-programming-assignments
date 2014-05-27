@@ -70,10 +70,12 @@ public:
    void add_child(CgenNodeP child);
    List<CgenNode> *get_children() { return children; }
    void set_parentnd(CgenNodeP p);
+   CgenNode *get_parentnd() const { return parentnd; }
    CgenNodeP get_parentnd() { return parentnd; }
    int basic() { return (basic_status == Basic); }
    void build_offset_tables();
    void set_class_tag(int tag) { class_tag = tag; }
+   int get_class_tag() const { return class_tag; }
    void generate_prototype_object(ostream &s) const;
    void generate_dispatch_table(ostream &s) const;
    void generate_initializing_routine(ostream &s);

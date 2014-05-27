@@ -173,6 +173,13 @@ class_objTab:
 	.word	String_init
 	.word	Main_protObj
 	.word	Main_init
+class_faTab:
+	.word	-2
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	0
 Main_dispTab:
 	.word	Object.abort
 	.word	Object.type_name
@@ -287,16 +294,23 @@ Main.main:
 	li	$t1 1
 	jal	_case_abort2
 label0:
+	lw	$t2 0($a0)
+	li	$t3 -2
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
-	li	$t1 5
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label2
-	la	$a0 int_const0
-	b	label1
-label2:
-	jal	_case_abort
 label1:
+	li	$t1 5
+	beq	$t1 $t2 label2
+	sll	$t2 $t2 2
+	la	$t1 class_faTab
+	add	$t2 $t1 $t2
+	lw	$t2 0($t2)
+	bne	$t2 $t3 label1
+	jal	_case_abort
+label2:
+	la	$a0 int_const0
+	b	label3
+label3:
 	addiu	$sp $sp 4
 	lw	$fp 12($sp)
 	lw	$s0 8($sp)

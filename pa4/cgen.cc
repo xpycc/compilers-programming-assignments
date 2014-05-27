@@ -960,6 +960,21 @@ void CgenClassTable::code()
     str << WORD; emit_init_ref(nametab[i], str); str << "\n";
   }  
 
+  if (cgen_debug) cout << "coding class father table\n";
+  str << CLASSFATAB << LABEL;
+  str << WORD << "-2\n";
+  for (int i = 1; i < 5; ++i) {
+    str << WORD << "0\n";
+  }
+  for (List<CgenNode>* l = nds; l; l = l->tl()) {
+    int i; Symbol name = l->hd()->name;
+    for (i = 0; i < 5; ++i)
+      if (strcmp(nametab[i]->get_string(), name->get_string()) == 0)
+        break;
+    if (i != 5) continue;
+    str << WORD << lookup(name)->get_parentnd()->get_class_tag() << "\n";
+  }
+
   if (cgen_debug) cout << "coding dispatch tables\n";
   for (List<CgenNode>* l = nds; l; l = l->tl()) {
     l->hd()->generate_dispatch_table(str);
@@ -1310,6 +1325,9 @@ struct BranchComp {
   BranchComp(Symbol t): type_decl(t) {}
 };
 
+/*
+ *  first version of type case expression
+ *
 void CgenNode::travel(const std::vector<branch_class*> &case_vector, int case_index, struct CaseInfo* ci) {
   int i = std::find_if(case_vector.begin(), case_vector.end(), BranchComp(name)) - case_vector.begin();
   if (i != (int)case_vector.size()) {
@@ -1353,16 +1371,65 @@ void typcase_class::code(ostream &s) {
     case_vector.push_back((branch_class*)cases->nth(i));
   }
   struct CaseInfo ci = { temp_offset(curr_temp_offset++), base_label_number + 1, &s };
-  if (expr->type != SELF_TYPE) {
-    classtable->lookup(expr->type)->travel(case_vector, (int)case_vector.size(), &ci);
-  } else {
-    classtable->lookup(curr_class->name)->travel(case_vector, (int)case_vector.size(), &ci);
-  }
+  classtable->lookup(expr->type)->travel(case_vector, (int)case_vector.size(), &ci);
+      // there is no SELF_TYPE
 
   // travel has defined no_match
   emit_jal("_case_abort", s);
   emit_label_def(base_label_number + 1, s);     // exit_point:
   emit_addiu(SP, SP, 4, s);             // pop stack
+  --curr_temp_offset;
+}
+*/
+
+/*
+ * version 2: father table needed
+ */
+void typcase_class::code(ostream &s) {
+  expr->code(s);
+  int base_label_number = curr_label_number, len = cases->len();
+  curr_label_number += 3 + len;
+
+  int expr_offset = curr_temp_offset++;
+  emit_bne(ACC, ZERO, base_label_number, s);    // goto case_begin
+  emit_load_string(ACC, (StringEntry*)curr_class->filename, s);
+  emit_load_imm(T1, 1, s);
+  emit_jal("_case_abort2", s);
+
+  emit_label_def(base_label_number, s);         // case_begin:
+  emit_load(T2, TAG_OFFSET, ACC, s);
+  emit_load_imm(T3, -2, s);                     // -2 is the magic number
+  emit_push(ACC, s);                            // store ACC
+
+  emit_label_def(base_label_number + 1, s);     // loop:
+  for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+    branch_class *ca = (branch_class*)cases->nth(i);
+    emit_load_imm(T1, classtable->lookup(ca->type_decl)->get_class_tag(), s);
+    emit_beq(T1, T2, base_label_number + i + 2, s);   // goto match_i
+  }
+  emit_sll(T2, T2, 2, s);                       // T2 = T2 * 4;
+  emit_load_address(T1, CLASSFATAB, s);
+  emit_add(T2, T1, T2, s);
+  emit_load(T2, 0, T2, s);                      // assign T2's father to T2
+  emit_bne(T2, T3, base_label_number + 1, s);   // if class_tag is not magic number, goto loop
+  emit_jal("_case_abort", s);
+
+  for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+    branch_class *ca = (branch_class*)cases->nth(i);
+    symtab->enterscope();
+    symtab->addid(ca->name, new SymInfo(ca->type_decl, temp_offset(expr_offset)));
+
+    emit_label_def(base_label_number + i + 2, s);     // match_i:
+    ca->expr->code(s);
+    if (cases->more(i)) {
+      emit_branch(base_label_number + 2 + len, s);    // goto exit_point
+    }
+
+    symtab->exitscope();
+  }
+
+  emit_label_def(base_label_number + 2 + len, s);     // exit_point:
+  emit_addiu(SP, SP, 4, s);                           // pop stack
   --curr_temp_offset;
 }
 

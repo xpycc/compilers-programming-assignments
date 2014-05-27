@@ -200,6 +200,13 @@ class_objTab:
 	.word	String_init
 	.word	Main_protObj
 	.word	Main_init
+class_faTab:
+	.word	-2
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	1
 Main_dispTab:
 	.word	Object.abort
 	.word	Object.type_name

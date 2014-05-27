@@ -203,6 +203,13 @@ class_objTab:
 	.word	String_init
 	.word	Main_protObj
 	.word	Main_init
+class_faTab:
+	.word	-2
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	1
 Main_dispTab:
 	.word	Object.abort
 	.word	Object.type_name
@@ -323,29 +330,23 @@ Main.main:
 	li	$t1 1
 	jal	_case_abort2
 label0:
+	lw	$t2 0($a0)
+	li	$t3 -2
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
+label1:
 	li	$t1 2
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label2
-	la	$a0 str_const1
-	sw	$a0 0($sp)
-	addiu	$sp $sp -4
-	move	$a0 $s0
-	bne	$a0 $zero label3
-	la	$a0 str_const0
-	li	$t1 1
-	jal	_dispatch_abort
-label3:
-	lw	$t1 8($a0)
-	lw	$t1 12($t1)
-	jalr		$t1
-	b	label1
-label2:
+	beq	$t1 $t2 label2
 	li	$t1 3
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label4
-	la	$a0 str_const2
+	beq	$t1 $t2 label3
+	sll	$t2 $t2 2
+	la	$t1 class_faTab
+	add	$t2 $t1 $t2
+	lw	$t2 0($t2)
+	bne	$t2 $t3 label1
+	jal	_case_abort
+label2:
+	la	$a0 str_const1
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
 	move	$a0 $s0
@@ -357,10 +358,22 @@ label5:
 	lw	$t1 8($a0)
 	lw	$t1 12($t1)
 	jalr		$t1
-	b	label1
+	b	label4
+label3:
+	la	$a0 str_const2
+	sw	$a0 0($sp)
+	addiu	$sp $sp -4
+	move	$a0 $s0
+	bne	$a0 $zero label6
+	la	$a0 str_const0
+	li	$t1 1
+	jal	_dispatch_abort
+label6:
+	lw	$t1 8($a0)
+	lw	$t1 12($t1)
+	jalr		$t1
+	b	label4
 label4:
-	jal	_case_abort
-label1:
 	addiu	$sp $sp 4
 	addiu	$sp $sp 4
 	lw	$fp 12($sp)

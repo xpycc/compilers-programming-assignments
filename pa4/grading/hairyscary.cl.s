@@ -248,6 +248,17 @@ class_objTab:
 	.word	Bar_init
 	.word	Foo_protObj
 	.word	Foo_init
+class_faTab:
+	.word	-2
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+	.word	1
+	.word	9
+	.word	7
+	.word	6
 Main_dispTab:
 	.word	Object.abort
 	.word	Object.type_name
@@ -481,48 +492,52 @@ Bazz_init:
 	li	$t1 1
 	jal	_case_abort2
 label0:
+	lw	$t2 0($a0)
+	li	$t3 -2
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
+label1:
 	li	$t1 6
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label2
+	beq	$t1 $t2 label2
+	li	$t1 7
+	beq	$t1 $t2 label3
+	li	$t1 9
+	beq	$t1 $t2 label4
+	li	$t1 8
+	beq	$t1 $t2 label5
+	sll	$t2 $t2 2
+	la	$t1 class_faTab
+	add	$t2 $t1 $t2
+	lw	$t2 0($t2)
+	bne	$t2 $t3 label1
+	jal	_case_abort
+label2:
 	la	$a0 Foo_protObj
 	jal	Object.copy
 	jal	Foo_init
-	b	label1
-label2:
-	li	$t1 9
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label3
-	la	$a0 Razz_protObj
-	jal	Object.copy
-	jal	Razz_init
-	b	label1
+	b	label6
 label3:
-	li	$t1 7
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label4
 	la	$a0 Bar_protObj
 	jal	Object.copy
 	jal	Bar_init
-	b	label1
+	b	label6
 label4:
-	li	$t1 8
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label5
-	lw	$a0 -4($fp)
-	b	label1
+	la	$a0 Razz_protObj
+	jal	Object.copy
+	jal	Razz_init
+	b	label6
 label5:
-	jal	_case_abort
-label1:
+	lw	$a0 -4($fp)
+	b	label6
+label6:
 	addiu	$sp $sp 4
 	sw	$a0 16($s0)
 	move	$a0 $s0
-	bne	$a0 $zero label6
+	bne	$a0 $zero label7
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label6:
+label7:
 	lw	$t1 8($a0)
 	lw	$t1 28($t1)
 	jalr		$t1
@@ -544,11 +559,11 @@ Bazz.printh:
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
 	move	$a0 $s0
-	bne	$a0 $zero label7
+	bne	$a0 $zero label8
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label7:
+label8:
 	lw	$t1 8($a0)
 	lw	$t1 16($t1)
 	jalr		$t1
@@ -596,77 +611,47 @@ Razz_init:
 	move	$s0 $a0
 	jal	Foo_init
 	move	$a0 $s0
-	bne	$a0 $zero label8
+	bne	$a0 $zero label9
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_case_abort2
-label8:
+label9:
+	lw	$t2 0($a0)
+	li	$t3 -2
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
+label10:
 	li	$t1 7
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label10
+	beq	$t1 $t2 label11
+	li	$t1 8
+	beq	$t1 $t2 label12
+	sll	$t2 $t2 2
+	la	$t1 class_faTab
+	add	$t2 $t1 $t2
+	lw	$t2 0($t2)
+	bne	$t2 $t3 label10
+	jal	_case_abort
+label11:
 	la	$a0 Bar_protObj
 	jal	Object.copy
 	jal	Bar_init
-	b	label9
-label10:
-	li	$t1 8
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label11
+	b	label13
+label12:
 	lw	$a0 -4($fp)
-	b	label9
-label11:
-	jal	_case_abort
-label9:
+	b	label13
+label13:
 	addiu	$sp $sp 4
 	sw	$a0 32($s0)
 	lw	$a0 24($s0)
-	bne	$a0 $zero label12
-	la	$a0 str_const0
-	li	$t1 1
-	jal	_dispatch_abort
-label12:
-	jal	Bazz.doh
-	sw	$a0 0($sp)
-	addiu	$sp $sp -4
-	lw	$a0 16($s0)
-	bne	$a0 $zero label13
-	la	$a0 str_const0
-	li	$t1 1
-	jal	_dispatch_abort
-label13:
-	lw	$t1 8($a0)
-	lw	$t1 32($t1)
-	jalr		$t1
-	jal	Object.copy
-	lw	$t1 12($a0)
-	lw	$t2 4($sp)
-	lw	$t2 12($t2)
-	add	$t1 $t2 $t1
-	sw	$t1 12($a0)
-	addiu	$sp $sp 4
-	sw	$a0 0($sp)
-	addiu	$sp $sp -4
-	lw	$a0 32($s0)
 	bne	$a0 $zero label14
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
 label14:
-	lw	$t1 8($a0)
-	lw	$t1 32($t1)
-	jalr		$t1
-	jal	Object.copy
-	lw	$t1 12($a0)
-	lw	$t2 4($sp)
-	lw	$t2 12($t2)
-	add	$t1 $t2 $t1
-	sw	$t1 12($a0)
-	addiu	$sp $sp 4
+	jal	Bazz.doh
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
-	move	$a0 $s0
+	lw	$a0 16($s0)
 	bne	$a0 $zero label15
 	la	$a0 str_const0
 	li	$t1 1
@@ -684,12 +669,48 @@ label15:
 	addiu	$sp $sp 4
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
-	move	$a0 $s0
+	lw	$a0 32($s0)
 	bne	$a0 $zero label16
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
 label16:
+	lw	$t1 8($a0)
+	lw	$t1 32($t1)
+	jalr		$t1
+	jal	Object.copy
+	lw	$t1 12($a0)
+	lw	$t2 4($sp)
+	lw	$t2 12($t2)
+	add	$t1 $t2 $t1
+	sw	$t1 12($a0)
+	addiu	$sp $sp 4
+	sw	$a0 0($sp)
+	addiu	$sp $sp -4
+	move	$a0 $s0
+	bne	$a0 $zero label17
+	la	$a0 str_const0
+	li	$t1 1
+	jal	_dispatch_abort
+label17:
+	lw	$t1 8($a0)
+	lw	$t1 32($t1)
+	jalr		$t1
+	jal	Object.copy
+	lw	$t1 12($a0)
+	lw	$t2 4($sp)
+	lw	$t2 12($t2)
+	add	$t1 $t2 $t1
+	sw	$t1 12($a0)
+	addiu	$sp $sp 4
+	sw	$a0 0($sp)
+	addiu	$sp $sp -4
+	move	$a0 $s0
+	bne	$a0 $zero label18
+	la	$a0 str_const0
+	li	$t1 1
+	jal	_dispatch_abort
+label18:
 	lw	$t1 8($a0)
 	lw	$t1 28($t1)
 	jalr		$t1
@@ -716,21 +737,21 @@ Bar_init:
 	move	$s0 $a0
 	jal	Razz_init
 	move	$a0 $s0
-	bne	$a0 $zero label17
+	bne	$a0 $zero label19
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label17:
+label19:
 	lw	$t1 8($a0)
 	lw	$t1 32($t1)
 	jalr		$t1
 	sw	$a0 40($s0)
 	move	$a0 $s0
-	bne	$a0 $zero label18
+	bne	$a0 $zero label20
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label18:
+label20:
 	lw	$t1 8($a0)
 	lw	$t1 28($t1)
 	jalr		$t1
@@ -750,56 +771,61 @@ Foo_init:
 	move	$s0 $a0
 	jal	Bazz_init
 	move	$a0 $s0
-	bne	$a0 $zero label19
+	bne	$a0 $zero label21
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_case_abort2
-label19:
+label21:
+	lw	$t2 0($a0)
+	li	$t3 -2
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
-	li	$t1 9
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label21
-	la	$a0 Razz_protObj
-	jal	Object.copy
-	jal	Razz_init
-	b	label20
-label21:
+label22:
 	li	$t1 7
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label22
+	beq	$t1 $t2 label23
+	li	$t1 9
+	beq	$t1 $t2 label24
+	li	$t1 8
+	beq	$t1 $t2 label25
+	sll	$t2 $t2 2
+	la	$t1 class_faTab
+	add	$t2 $t1 $t2
+	lw	$t2 0($t2)
+	bne	$t2 $t3 label22
+	jal	_case_abort
+label23:
 	la	$a0 Bar_protObj
 	jal	Object.copy
 	jal	Bar_init
-	b	label20
-label22:
-	li	$t1 8
-	lw	$t2 0($a0)
-	bne	$t1 $t2 label23
+	b	label26
+label24:
+	la	$a0 Razz_protObj
+	jal	Object.copy
+	jal	Razz_init
+	b	label26
+label25:
 	lw	$a0 -4($fp)
-	b	label20
-label23:
-	jal	_case_abort
-label20:
+	b	label26
+label26:
 	addiu	$sp $sp 4
 	sw	$a0 24($s0)
 	lw	$a0 24($s0)
-	bne	$a0 $zero label24
+	bne	$a0 $zero label27
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label24:
+label27:
 	lw	$t1 8($a0)
 	lw	$t1 32($t1)
 	jalr		$t1
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
 	lw	$a0 16($s0)
-	bne	$a0 $zero label25
+	bne	$a0 $zero label28
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label25:
+label28:
 	lw	$t1 8($a0)
 	lw	$t1 32($t1)
 	jalr		$t1
@@ -813,11 +839,11 @@ label25:
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
 	move	$a0 $s0
-	bne	$a0 $zero label26
+	bne	$a0 $zero label29
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label26:
+label29:
 	lw	$t1 8($a0)
 	lw	$t1 32($t1)
 	jalr		$t1
@@ -831,11 +857,11 @@ label26:
 	sw	$a0 0($sp)
 	addiu	$sp $sp -4
 	move	$a0 $s0
-	bne	$a0 $zero label27
+	bne	$a0 $zero label30
 	la	$a0 str_const0
 	li	$t1 1
 	jal	_dispatch_abort
-label27:
+label30:
 	lw	$t1 8($a0)
 	lw	$t1 28($t1)
 	jalr		$t1
